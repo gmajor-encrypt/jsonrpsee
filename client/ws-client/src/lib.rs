@@ -88,6 +88,7 @@ pub struct WsClientBuilder {
 	max_redirections: usize,
 	id_kind: IdKind,
 	max_log_length: u32,
+	proxy: Option<String>,
 }
 
 impl Default for WsClientBuilder {
@@ -105,6 +106,7 @@ impl Default for WsClientBuilder {
 			max_redirections: 5,
 			id_kind: IdKind::Number,
 			max_log_length: 4096,
+			proxy: None,
 		}
 	}
 }
@@ -213,6 +215,11 @@ impl WsClientBuilder {
 		self
 	}
 
+	pub fn set_proxy(mut self, uri: String) -> Self {
+		self.proxy = Option::from(uri);
+		self
+	}
+
 	/// Build the client with specified URL to connect to.
 	/// You must provide the port number in the URL.
 	///
@@ -233,6 +240,7 @@ impl WsClientBuilder {
 			max_buffer_capacity_per_subscription,
 			id_kind,
 			max_log_length,
+			proxy,
 		} = self;
 
 		let transport_builder = WsTransportClientBuilder {
@@ -242,6 +250,7 @@ impl WsClientBuilder {
 			max_request_size,
 			max_response_size,
 			max_redirections,
+			proxy
 		};
 
 		let uri = Url::parse(url.as_ref()).map_err(|e| Error::Transport(e.into()))?;

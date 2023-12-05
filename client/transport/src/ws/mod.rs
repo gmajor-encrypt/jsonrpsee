@@ -25,7 +25,7 @@
 // DEALINGS IN THE SOFTWARE.
 
 mod stream;
-
+pub mod socks;
 use std::io;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -41,6 +41,7 @@ use soketto::{connection, Data, Incoming};
 use stream::EitherStream;
 use thiserror::Error;
 use tokio::net::TcpStream;
+use socks::SocksStream;
 
 pub use http::{uri::InvalidUri, HeaderMap, HeaderValue, Uri};
 pub use soketto::handshake::client::Header;
@@ -59,6 +60,7 @@ pub struct Receiver {
 	inner: connection::Receiver<BufReader<BufWriter<EitherStream>>>,
 }
 
+
 /// Builder for a WebSocket transport [`Sender`] and ['Receiver`] pair.
 #[derive(Debug)]
 pub struct WsTransportClientBuilder {
@@ -74,6 +76,8 @@ pub struct WsTransportClientBuilder {
 	pub max_response_size: u32,
 	/// Max number of redirections.
 	pub max_redirections: usize,
+	/// Proxy URL
+	pub proxy: Option<String>,
 }
 
 impl Default for WsTransportClientBuilder {
@@ -85,6 +89,7 @@ impl Default for WsTransportClientBuilder {
 			connection_timeout: Duration::from_secs(10),
 			headers: http::HeaderMap::new(),
 			max_redirections: 5,
+			proxy: None,
 		}
 	}
 }
@@ -148,6 +153,13 @@ impl WsTransportClientBuilder {
 	/// (default is 5).
 	pub fn max_redirections(mut self, redirect: usize) -> Self {
 		self.max_redirections = redirect;
+		self
+	}
+
+	/// Set the proxy URL, e.g. `socks5://
+	/// (default is None).
+	pub fn proxy(mut self, proxy: Option<String>) -> Self {
+		self.proxy = proxy;
 		self
 	}
 }
@@ -298,7 +310,7 @@ impl WsTransportClientBuilder {
 			let sockaddrs = std::mem::take(&mut target.sockaddrs);
 			for sockaddr in &sockaddrs {
 				#[cfg(feature = "__tls")]
-				let tcp_stream = match connect(*sockaddr, self.connection_timeout, &target.host, connector.as_ref()).await {
+					let tcp_stream = match connect(*sockaddr, self.connection_timeout, &target.host, connector.as_ref(), self.proxy.clone()).await {
 					Ok(stream) => stream,
 					Err(e) => {
 						tracing::debug!("Failed to connect to sockaddr: {:?}", sockaddr);
@@ -308,7 +320,7 @@ impl WsTransportClientBuilder {
 				};
 
 				#[cfg(not(feature = "__tls"))]
-				let tcp_stream = match connect(*sockaddr, self.connection_timeout).await {
+				let tcp_stream = match connect(*sockaddr, self.connection_timeout, self.proxy.clone()).await {
 					Ok(stream) => stream,
 					Err(e) => {
 						tracing::debug!("Failed to connect to sockaddr: {:?}", sockaddr);
@@ -412,8 +424,9 @@ async fn connect(
 	timeout_dur: Duration,
 	host: &str,
 	tls_connector: Option<&tokio_rustls::TlsConnector>,
+	proxy: Option<String>,
 ) -> Result<EitherStream, WsHandshakeError> {
-	let socket = TcpStream::connect(sockaddr);
+	let socket = SocksStream::connect(sockaddr, proxy);
 	let timeout = tokio::time::sleep(timeout_dur);
 	tokio::select! {
 		socket = socket => {
@@ -435,8 +448,8 @@ async fn connect(
 }
 
 #[cfg(not(feature = "__tls"))]
-async fn connect(sockaddr: SocketAddr, timeout_dur: Duration) -> Result<EitherStream, WsHandshakeError> {
-	let socket = TcpStream::connect(sockaddr);
+async fn connect(sockaddr: SocketAddr, timeout_dur: Duration,proxy: Option<String>) -> Result<EitherStream, WsHandshakeError> {
+	let socket = SocksStream::connect(sockaddr, proxy);
 	let timeout = tokio::time::sleep(timeout_dur);
 	tokio::select! {
 		socket = socket => {
